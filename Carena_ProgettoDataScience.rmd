@@ -1,0 +1,445 @@
+---
+title: "Progetto di Fondamenti di Scienza dei Dati"
+author: "Ethan Carena"
+date: "06/07/2021"
+output: ioslides_presentation
+---
+
+```{css, echo=FALSE}
+body{
+  background-color: #1DB954;
+}
+
+/* scrolling */
+slides > slide {
+  overflow-x: auto !important;
+  overflow-y: auto !important;
+}
+
+/* hide page numbers */
+slides > slide:not(.nobackground):after {
+  content: '';
+}
+::-webkit-scrollbar{
+width: 13px;
+height: 13px;
+}
+::-webkit-scrollbar-thumb{
+background: linear-gradient(13deg, #B2FFCE 14%,#B2FFCE 64%);
+border-radius: 10px;
+border: none;
+}
+::-webkit-scrollbar-thumb:hover{
+background: linear-gradient(13deg, #000000 14%,#000000 64%);
+}
+::-webkit-scrollbar-track{
+border-radius: 10px;
+}
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache = FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r eval=TRUE, echo=FALSE}
+library("dplyr")
+library("corrplot")
+library(tidyverse)
+library(scales)
+library(plotly)
+library(wordcloud)
+library(tidytext)
+library(SnowballC)
+```
+
+```{r eval=TRUE, echo=FALSE}
+songs = read_csv('tracks.csv') 
+artists = read_csv('artists.csv')%>%
+  filter(!is.na(popularity), !is.na(followers))
+
+```
+# Spotify: descrizione e analisi 
+
+## Introduzione
+<center>
+  <img src="https://1000marche.net/wp-content/uploads/2020/03/Spotify-logo.png" width=384 height=216 />
+</center>
+Spotify è un servizio di streaming on-demand che offre una vasta selezione di brani musicali di varie case discografiche ed etichette indipendenti e da qualche anno anche podcast.
+
+
+
+## Dataset
+Per l'analisi verrano utilizzati due dataset, entrambi ottenuti tramite la [API ufficiale di Spotify](https://developer.spotify.com/documentation/web-api/) ma creati e mantenuti da Yamac Eren Ay e scaricabili da [Kaggle](https://www.kaggle.com/yamaerenay/spotify-dataset-19212020-160k-tracks). 
+
+Il primo contiene informazioni riguardanti i brani, mentre il secondo contiene informazioni su gli artisti.
+
+I due dataset contengono delle features molto interessanti, tra cui:
+
+* danceability = descrive quanto una canzone sia adatta ad essere ballata in base ad alcuni elementi musicali come il tempo, la stabilità del ritmo, ecc. Il valore fornito è compreso tra 0 e 1.
+* energy = valore compreso tra 0 e 1 che rappresenta quanto un brano è "energetico"
+* instrumentalness = predice se una traccia non ha tracce vocali. Più il valore è vicino a 1, più è probabile che la canzone sia instrumentale. Valori sopra allo 0.5 rappresentano solitamente tracce instrumentali.
+* liveness = descrive la probabilità un brano sia stato eseguito live. Il valore è compreso tra 0 e 1.
+* loudness = la "rumorosità" generale di un brano in decibels (dB), ossia la qualità acustica e psicoacustica associata alla forza di un suono, determinata dalla pressione[1] che l'onda sonora esercita sul timpano.
+* popularity = popolarità del brano/artista. Il valore varia da 0 a 100. Questo valore fa abbastanza affidamento a quanto un brano è ascoltato in quel periodo. La popolarità dell'artista dipende dalla popolarità dei suoi brani.
+* speechiness = rileva se sono presenti dialoghi in un brano. Se il brano è un talk show, audio libro, ecc. allora il valore sarà molto più vicino ad 1.
+* tempo = il tempo stimato in battiti per minuto (BPM), ossia la velocità/ritmo di un brano.
+* valence = valore da 0 a 1 che descrive quanta positività viene trasmessa da un brano. 
+
+I dati presenti nei dataset sono aggiornati ad Aprile 2021, quindi alcuni risultati dell'analisi saranno diversi rispetto a quello che si potrebbe ottenere con dei dati attuali.
+
+# Analisi features
+
+## Correlazioni tra features
+
+
+```{r eval=TRUE, echo=FALSE}
+#songs[which.max(songs$track_popularity),]
+cor_songs = songs %>%
+  select(popularity, danceability, energy, loudness, speechiness, acousticness, instrumentalness, valence, tempo, duration_ms, liveness)
+
+corrplot(cor(cor_songs),  method="color", order="hclust", tl.col="darkblue")
+
+```
+Come possiamo notare dal grafico, sono presenti delle correlazioni lineari, sia positive che negative, abbastanza elevate tra alcune variabili.
+
+In particolare, per quelle positive abbiamo come massima la correlazione tra loudness ed energy. Per quelle negative, invece, abbiamo la correlazione tra energy e acousticness.
+In effetti, una canzone più intensa/rumorosa ci dà maggiore "energia" e, come è visibile anche dal grafico, avendo una correlazione negativa tra acousticness e loudness, le canzoni acustiche sono in genere meno rumorose e quindi ci danno anche meno energia.
+
+## Come sono variate le features negli anni?
+```{r eval=TRUE, echo=FALSE}
+features_by_year = songs %>%
+  select(popularity, danceability, energy, loudness, speechiness, acousticness, instrumentalness, valence, tempo, duration_ms, liveness, release_date) %>%
+  mutate(Year = as.numeric(sapply(strsplit(release_date,"-"), getElement, 1))) %>%
+  rename(Duration = duration_ms) %>%
+  mutate(Duration = (Duration/60000)) %>%
+  group_by(Year) %>%
+  summarise_at(vars(popularity:liveness), mean) %>%
+  pivot_longer(cols=2:last_col(), names_to="chart", values_to = "features") %>%
+  mutate(chart = str_to_title(chart))
+
+features_by_year %>%
+  ggplot(aes(x = Year, y = features, colour = factor(chart))) +
+  geom_line() +
+  facet_wrap(~chart, scales = "free_y") +
+  scale_x_continuous(breaks = seq(1921, 2021, by = 25)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none")
+
+```
+
+Da questi grafici si possono fare alcune osservazioni:
+
+* I brani sono diventati sempre *meno acustici*, con un netto calo a partire da gli anni cinquanta circa, probabilmente a causa della diffusione di *strumenti elettronici* (come ad esempio la chitarra elettrica)
+* Fra gli anni '30 circa e gli anni '70, *valence* ha subito un calo per poi tornare a più o meno i valori che aveva negli anni precedenti. La causa potrebbero essere gli avvenimenti storici di quegli anni e quindi i temi affrontati dagli artisti. Lo stesso vale per *danceability*.
+* *instrumentalness* fra gli anni '20 e gli anni '50 circa ha avuto alcune variazioni (anche abbastanza elevate) ma da gli anni '50 in poi ha iniziato a diminuire in modo molto rapido. La causa potrebbe essere il passaggio da generi in cui sono poco presenti o assenti le voci a generi in cui, invece, la voce è molto presente
+* I brani sono molto più *energici* e *rumorosi* al giorno d'oggi proprio grazie al passaggio da brani più acustici e instrumentali a qualcosa di più intenso
+* I brani recenti sono più graditi
+
+## Distribuzione della durata dei brani
+```{r eval=TRUE, echo=FALSE}
+songs %>% 
+  mutate(Duration = duration_ms/60000) %>%
+  filter(Duration < 15) %>%
+  ggplot(aes(x = Duration)) + 
+  geom_histogram(bins=50) +
+  scale_x_continuous(breaks = seq(0, 40, by = 1)) 
+```
+Sono stati omessi i brani con durata maggiore di 15 minuti in quanto sono una percentuale molto piccola rispetto il numero di brani totale.
+
+Dal grafico si può notare che la maggior parte dei brani ha durata tra i 3 e i 4 minuti.
+
+
+# Generi 
+
+## Generi più popolari e più diffusi
+
+Per trovare i generi più popolari verrà utilizzata la feature *popularity* fornita dal dataset degli artists. 
+
+Infatti, utilizzeremo la media delle *popularity* degli artisti che appartengono ad un determinato genere. 
+
+
+```{r eval=TRUE, echo=FALSE}
+genres = artists %>% 
+  mutate(genres = str_remove(genres, "\\["), genres = str_remove(genres, "\\]")) %>%
+  separate_rows(genres, sep = ",") %>%
+  mutate(genres = str_remove(genres, "\\'"),genres = str_remove(genres, "\\'"),genres = str_trim(genres)) %>%
+  filter(!is.na(genres))
+
+```
+
+
+```{r eval=TRUE, echo=FALSE}
+song_genres = genres %>%
+  filter(genres != "") %>%
+  group_by(genres) %>%
+  summarise(Popularity =  mean(popularity), Artists = n(), Followers = sum(followers))
+
+
+song_genres %>%
+  arrange(-Popularity) %>%
+  head(10) %>%
+   ggplot(aes(x = Popularity , y = reorder(genres, Popularity), fill = genres)) +
+  geom_bar(stat="identity", binwidth=1) +
+  theme_light()+
+    theme(
+      legend.position = "none", 
+      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)
+    ) +
+  scale_y_discrete(label = function(x) str_trunc(x,20)) + 
+  scale_x_continuous(limit = c(0, max(song_genres$Popularity) + 0.1*max(song_genres$Popularity)), expand = c(0, 0)) +
+  labs(x = "Popularity", y = "Genere", title="Generi più popolari")
+```
+Per i generi più diffusi utilizzeremo sempre il dataset degli artisti e utilizzeremo la quantità di artisti che appartengono ad un genere per determinare la loro diffusione.
+```{r eval=TRUE, echo=FALSE}
+song_genres %>%
+  arrange(-Artists) %>%
+  head(10) %>%
+  ggplot(aes(x = Artists, y = reorder(genres, Artists), fill = genres)) +
+  geom_bar(width = 1, stat = "identity", color = "white") +
+  theme_light() +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  scale_y_discrete(label = function(x) str_trunc(x,20)) +
+  labs(x = "Numero di artisti", y = "Genere", title="Generi più diffusi") 
+```
+Sebbene pop e dance pop siano in entrambi i casi nelle prime due posizioni e alcuni generi siano comunque presenti in entrambi i grafici, sono visibili delle discrepanze dovute al fatto che *popularity* indica quanto un brano/artista è popolare in quel periodo e, con la diffusione di nuovi generi, è possibile che alcuni generi più recenti siano più popolari di altri meno recenti che però hanno un numero di artisti più alto proprio perché si sono diffusi prima. Inoltre, questi risultati sono stati ottenuti tramite la popolarità degli artisti che appartengono a quei generi e quindi ci potrebbero anche essere degli outliers che "falsificano" un po' la popolarità di un genere.
+
+In ogni caso, c'è comunque una decente correlazione positiva tra *popularity* e il *numero di artisti* che appartengono ad un certo genere, probabilmente perché gli artisti si concentrano su generi più conosciuti e popolari.
+
+```{r eval=TRUE, echo=FALSE}
+cor_gen = song_genres %>%
+  select(Popularity, Artists)
+cor(cor_gen)
+```
+## Generi con più "followers"
+
+I dataset utilizzati non forniscono il numero di followers che possiede un genere.
+
+Tuttavia, si può sfruttare il numero di followers degli artisti per determinare più o meno quanti followers abbia.
+
+```{r eval=TRUE, echo=FALSE}
+song_genres %>%
+  arrange(-Followers) %>%
+  head(10) %>%
+  ggplot(aes(x = Followers, y = reorder(genres, Followers), fill = genres)) +
+  geom_bar(width = 1, stat = "identity", color = "white") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  scale_y_discrete(label = function(x) str_trunc(x,20)) +
+ # scale_x_continuous(limit = c(0, max(top10_usedg$Popularity) + 0.1*max(top_10_genres$Popularity)), expand = c(0, 0)) +
+  labs(x = "Followers", y = "Genre") 
+
+```
+Anche qui il pop e il dance pop dominano, con rock, rap e hip hop sempre tra i primi 10, probabilmente dovuto alla loro costante popolarità negli anni.
+E' da tenere in considerazione anche la bassa ma comunque presente correlazione che queste due variabili hanno.
+ 
+```{r eval=TRUE, echo=FALSE}
+cor_gen = song_genres %>%
+  select(Popularity, Followers)
+cor(cor_gen)
+```
+ 
+## Generi con un maggior numero di sottogeneri
+
+Un genere musicale può avere a sua volta dei sottogeneri, cosa che si può osservare anche dai grafici precedenti.
+
+Tramite text mining è possibile trovare quali generi hanno più sottogeneri andando a cercare qual è il termine più frequente fra i nomi dei generi.
+
+```{r eval=TRUE, echo=FALSE}
+genres_mining = genres %>%
+  select(genres) %>%
+  filter(!is.na(genres)) %>%
+  unnest_tokens(word, genres) %>%
+  count(word, sort = TRUE)
+
+
+set.seed(8008)
+wordcloud(words = genres_mining$word , freq = genres_mining$n, min.freq = 8,
+          max.words=200, random.order=FALSE, rot.per=0.48, 
+          colors=brewer.pal(8, "Dark2"))
+```
+Osservazioni: 
+
+* Dal grafico risulta che pop, rock, indie e metal sono i generi con più sottogeneri. Tuttavia, bisogna precisare che questo metodo è valido soltanto per i sottogeneri che nel proprio nome contengono anche quello del genere principale, mentre generi come il Bebop (sottogenere del Jazz) non vengono considerati come sottogeneri. 
+
+* Il grafico ci dà comunque un'idea generale di quali generi abbiano più sottogeneri e quindi lo possiamo considerare valido
+
+# Artisti
+
+## Gli artisti più seguiti sono anche i più popolari?
+
+```{r eval=TRUE, echo=FALSE}
+top10_artists = artists %>%
+  select(name, popularity) %>%
+  arrange(-popularity) %>%
+  head(10)
+top10_artists %>%
+  ggplot(aes(x = popularity, y =reorder(name, popularity), fill = name)) +
+  geom_bar(stat="identity") +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  coord_cartesian(xlim = c(min(top10_artists$popularity) - 10, max(top10_artists$popularity))) +
+  labs(x = "Popularity", y = "Nome", title="Artisti popolari al momento" )
+```
+
+```{r eval=TRUE, echo=FALSE}
+top10_followed = artists %>%
+  select(name, followers) %>%
+  arrange(-followers) %>%
+  head(10)
+top10_followed %>%
+  ggplot(aes( x = followers, y = reorder(name, followers), fill = name)) + 
+  geom_bar(stat="identity") +
+  theme(legend.position = "none",axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  labs(x = "Nome", y = "Followers", title="Artisti con più followers")
+```
+Alcuni artisti sono presenti in entrambi i grafici. Tuttavia, è sbagliaito affermare che gli artisti più "popolari" siano anche i più seguiti. Infatti, la feature *popularity* descrive quanto un artista è popolare al momento, condizione che può essere temporanea a causa del rilascio di una "hit", ossia un brano molto popolare in quel periodo.
+
+L'osservazione fatta viene anche confermata dalla trascurabile correlazione che c'è tra le due variabili:
+
+```{r eval=TRUE, echo=FALSE}
+cor(artists$popularity, artists$followers)
+```
+## Gli artisti con più brani sono più seguiti/popolari?
+```{r eval=TRUE, echo=FALSE}
+songs_by_artists = songs %>% 
+  mutate(artists = str_remove(artists, "\\["), artists = str_remove(artists, "\\]")) %>%
+  separate_rows(artists, sep = ",") %>%
+  mutate(artists = str_remove(artists, "\\'"),artists = str_remove(artists, "\\'"),artists = str_trim(artists))
+```
+
+```{r eval=TRUE, echo=FALSE}
+mostsongs = songs_by_artists %>%
+  filter(!duplicated(name) || !duplicated(artists)) %>%
+  group_by(artists) %>%
+  summarise(n = n()) %>%
+  arrange(-n) %>%
+  rename(name = artists)
+mostsongs = inner_join(artists, mostsongs) %>%
+  group_by(name) %>%
+  summarise(followers = sum(followers), popularity = mean(popularity), n =sum(n)) %>%
+  arrange(-n)
+mostsongs %>%
+  head(10) %>%
+  ggplot(aes( x = n, y = reorder(name, n), fill = name)) + 
+  geom_bar(stat="identity") +
+  theme(legend.position = "none",axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  labs(x = "Numero brani", y = "Nome", title="Artisti con più brani")
+```
+
+Dal grafico possiamo notare subito che nessuno fra questi artisti è presente anche negli altri grafici, il che ci indica che probabilmente non c'è alcuna relazione significativa tra le features.
+
+Si può verificare anche tramite i seguenti grafici:
+
+```{r eval=TRUE, echo=FALSE}
+mostsongs %>%
+  pivot_longer(cols=2:3, names_to="chart", values_to="features") %>%
+  mutate(chart = chart) %>%
+  ggplot(aes(x = n, y = features,  colour = factor(chart))) +
+  theme(legend.position = "none", plot.margin = unit(c("1","1","1","0.5"), "cm"), axis.title.x = element_text(margin = margin(t = 20, r =0, b = 0, l = 0)), axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0))) +
+  facet_wrap(~chart, scales="free_y") +
+  geom_point()  +
+  labs(y = "Features", x = "Numero di brani")
+
+```
+
+Per *followers* si nota subito che non c'è alcuna relazione che valga la pena considerare, per *popularity* sembra che si sia una relazione ma è talmente lieve che può essere trascurata.
+
+
+
+# Brani
+
+## Top 10
+
+Brani più popolari
+
+```{r eval=TRUE, echo=FALSE}
+top10_songs = songs %>%
+  select(name, popularity) %>%
+  arrange(-popularity) %>%
+  head(10)
+top10_songs %>%
+  ggplot(aes(x = popularity , y = reorder(name, popularity), fill = name)) +
+  geom_bar(stat="identity") +
+  theme(axis.title.x = element_text(margin = margin(t = 20, r =0, b = 0, l = 0)), axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0)), plot.margin = unit(c("1","1","1","1"), "cm"), legend.position = "none", axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  coord_cartesian(xlim = c(min(top10_songs$popularity) - 10, max(top10_songs$popularity))) +
+  scale_y_discrete(label = function(x) str_trunc(x,20)) +
+  labs(x = "Popolarità", y = "Titolo") 
+```
+
+Brani con maggiore durata
+
+```{r eval=TRUE, echo=FALSE}
+songs %>%
+  select(name, duration_ms) %>%
+  mutate(Duration = duration_ms/60000) %>%
+  arrange(-Duration) %>%
+  head(10) %>%
+  ggplot(aes(reorder(name, Duration), Duration, fill = name)) +
+  theme(legend.position = "none") +
+  geom_col() +
+  coord_flip() +
+  scale_x_discrete(label = function(x) str_trunc(x,20)) +
+  labs(x = "Titolo", "Durata")
+
+```
+
+## Brani rilasciati ogni anno
+
+Prendiamo in considerazione tutti gli anni presenti nel dataset fino al 2020, in quanto siamo solo a metà del 2021 e quindi il valore per il 2021 non sarebbe un dato corretto.
+
+```{r eval=TRUE, echo=FALSE}
+songs %>%
+  mutate(Year = as.numeric(sapply(strsplit(release_date,"-"), getElement, 1))) %>%
+  filter(Year != 2021) %>%
+  ggplot(aes(x = Year)) +
+  geom_bar(fill = "#1DB954") +
+  coord_cartesian(xlim = c(1921, 2020)) 
+  
+  
+```
+
+La crescita del numero di canzoni rilasciate sembra aumentare ogni anno sebbene ci sia un grande crollo nel 2000.
+Il motivo potrebbe essere che molte canzoni sono state rimasterizzate negli anni 2000 ma la data di rilascio coincide con quella del brano originale, incrementando quindi il numero di brani rilasciati in quell'anno.
+
+## Parole più frequenti nei titoli delle canzoni
+
+
+```{r eval=TRUE, echo=FALSE}
+songs_mining = songs %>%
+  select(name) %>%
+  filter(!is.na(names)) %>%
+  unnest_tokens(word, name) %>%
+  anti_join(stop_words) %>% 
+  mutate(word = wordStem(word))  %>%
+  count(word, sort = TRUE)
+songs_mining %>%
+  mutate(word = reorder(word, n)) %>%
+  filter(n >= 4000) %>%
+  ggplot(aes(x  = word, y = n, fill = word)) +
+  geom_col() +
+  xlab(NULL) +
+  coord_flip() +
+  theme(legend.position="none")
+```
+
+
+```{r eval=TRUE, echo=FALSE}
+set.seed(8080)
+wordcloud(words = songs_mining$word , freq = songs_mining$n, min.freq = 40, max.words=200, random.order=FALSE, rot.per=0.48, colors=brewer.pal(8, "Dark2"))
+```
+
+Molte tra queste parole sono termini musicali che indicano un tipo di brano o qualche caratteristica, tra cui proprio *remast* che è il prefisso di *Remastered*.
+Questo potrebbe confermare la teoria ipotizzata in precedenza riguardo il crollo del numero di canzoni rilasciate nel 2000.
+
+Fra le parole che invece non fanno parte di quella categoria, abbiamo *love* come parola con maggiore frequenza, il che indica che probabilmente ci sono molte canzoni che trattano un tema romantico.
+
+## Conclusione
+
+Il mondo della musica è sempre stato molto ampio e florido, sebbene in costante cambiamento.
+
+Infatti, come abbiamo visto, negli anni c'è stato un cambiamento nelle caratteristiche dei brani e con esso sono nati anche nuovi generi e sottogeneri, mentre altri sono diventati molto meno popolari.
+
+Tutto ciò non ha comunque ostacolato la crescita di questo settore, che anzi è in espansione con sempre più nuovi artisti e brani e tutto ciò si deve anche alla diffusione e l'evoluzione della tecnologia.
+
+Basta pensare come decenni fa per poter ascoltare della musica toccasse andare a concerti, in locali o comprare un giradischi e dischi, mentre adesso è molto più semplice e accessibile a tutti grazie a dispositivi come smartphones, computer, tablet, ecc. e a servizi come Spotify.
+
+
+
+ 
